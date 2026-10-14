@@ -206,4 +206,97 @@ public class AdvCardPlugin extends JavaPlugin implements Listener {
     private static String plain(Component c) {
         return c == null ? "" : PlainTextComponentSerializer.plainText().serialize(c);
     }
+}
+        ImageIO.write(img, "png", out);
+        return out.toByteArray();
+    }
+
+    private BufferedImage fetchTexture(String key) {
+        String base = getConfig().getString("texture-base", DEFAULT_TEXTURES);
+        String[] paths = {
+                "item/" + key, "block/" + key, "block/" + key + "_front",
+                "block/" + key + "_side", "block/" + key + "_top"
+        };
+        for (String p : paths) {
+            try {
+                HttpRequest r = HttpRequest.newBuilder(URI.create(base + "/" + p + ".png"))
+                        .timeout(Duration.ofSeconds(8)).GET().build();
+                HttpResponse<byte[]> resp = http.send(r, HttpResponse.BodyHandlers.ofByteArray());
+                if (resp.statusCode() == 200) {
+                    BufferedImage bi = ImageIO.read(new ByteArrayInputStream(resp.body()));
+                    if (bi != null) return bi;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    private void post(String name, UUID uuid, String frame, String title, String desc,
+                      byte[] icon) throws Exception {
+        String url = getConfig().getString("webhook-url", "");
+        if (url.isBlank() || url.contains("PASTE")) {
+            throw new IllegalStateException("webhook-url is not set in config.yml");
+        }
+
+        String verb = switch (frame) {
+            case "CHALLENGE" -> "has completed the challenge";
+            case "GOAL" -> "has reached the goal";
+            default -> "has made the advancement";
+        };
+        int color = frame.equals("CHALLENGE") ? 0xFF55FF : 0x55FF55;
+
+        StringBuilder emb = new StringBuilder("{\"color\":").append(color)
+                .append(",\"author\":{\"name\":").append(q(name + " " + verb + " " + title));
+        // Bedrock (Floodgate) players have a UUID starting with zeros -> no Mojang skin
+        if (uuid.getMostSignificantBits() != 0L) {
+            emb.append(",\"icon_url\":")
+                    .append(q("https://mc-heads.net/avatar/" + uuid + "/64"));
+        }
+        emb.append("},\"description\":").append(q(desc));
+        if (icon != null) emb.append(",\"thumbnail\":{\"url\":\"attachment://icon.png\"}");
+        emb.append("}");
+
+        StringBuilder json = new StringBuilder("{\"username\":")
+                .append(q(getConfig().getString("webhook-name", "Advancements")));
+        String av = getConfig().getString("webhook-avatar-url", "");
+        if (!av.isBlank()) json.append(",\"avatar_url\":").append(q(av));
+        json.append(",\"embeds\":[").append(emb).append("]");
+        if (icon != null) json.append(",\"attachments\":[{\"id\":0,\"filename\":\"icon.png\"}]");
+        json.append("}");
+
+        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(15));
+        if (icon == null) {
+            rb.header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json.toString()));
+        } else {
+            String boundary = "----advcard" + System.nanoTime();
+            ByteArrayOutputStream o = new ByteArrayOutputStream();
+            w(o, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+                    + "Content-Type: application/json\r\n\r\n" + json + "\r\n");
+            w(o, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"files[0]\"; "
+                    + "filename=\"icon.png\"\r\nContent-Type: image/png\r\n\r\n");
+            o.write(icon);
+            w(o, "\r\n--" + boundary + "--\r\n");
+            rb.header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(o.toByteArray()));
+        }
+        HttpResponse<String> resp = http.send(rb.build(), HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 300) {
+            throw new IOException("Webhook error " + resp.statusCode() + ": " + resp.body());
+        }
+    }
+
+    private static void w(ByteArrayOutputStream o, String s) throws IOException {
+        o.write(s.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String q(String s) {
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\"";
+    }
+
+    private static String plain(Component c) {
+        return c == null ? "" : PlainTextComponentSerializer.plainText().serialize(c);
+    }
               }
