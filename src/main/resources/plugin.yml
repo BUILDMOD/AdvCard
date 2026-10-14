@@ -1,0 +1,12 @@
+name: AdvCard
+version: '1.0.0'
+main: ph.zenith.advcard.AdvCardPlugin
+api-version: '26.2'
+description: Sends advancement cards to Discord
+commands:
+  advcard:
+    description: AdvCard admin command
+    usage: /advcard <test|reload>
+permissions:
+  advcard.admin:
+    default: op
